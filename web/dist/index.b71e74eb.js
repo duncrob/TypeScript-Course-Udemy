@@ -574,38 +574,68 @@ function hmrAccept(bundle /*: ParcelRequire */ , id /*: string */ ) {
 }
 
 },{}],"h7u1C":[function(require,module,exports) {
+var _userForm = require("./views/UserForm");
 var _user = require("./models/User");
-const user = new (0, _user.User)({
-    name: "new record",
-    age: 0
+const user = (0, _user.User).buildUser({
+    name: "NAME",
+    age: 20
 });
-user.events.on("change", ()=>{
-    console.log("changed!");
-});
-user.events.trigger("change");
+const userForm = new (0, _userForm.UserForm)(document.getElementById("root"), user);
+userForm.render();
 
-},{"./models/User":"4rcHn"}],"4rcHn":[function(require,module,exports) {
+},{"./views/UserForm":"gXSLD","./models/User":"4rcHn"}],"gXSLD":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
-parcelHelpers.export(exports, "User", ()=>User);
-var _eventing = require("./Eventing");
-var _sync = require("./Sync");
-const rootUrl = "http://localhost:3000/users";
-class User {
-    constructor(data){
-        this.data = data;
-        this.events = new (0, _eventing.Eventing)();
-        this.sync = new (0, _sync.Sync)(rootUrl);
+parcelHelpers.export(exports, "UserForm", ()=>UserForm);
+class UserForm {
+    constructor(parent, model){
+        this.parent = parent;
+        this.model = model;
+        this.onSetAgeClick = ()=>{
+            this.model.setRandomAge();
+        };
+        this.bindModel();
     }
-    get(propName) {
-        return this.data[propName];
+    bindModel() {
+        this.model.on("change", ()=>{
+            this.render();
+        });
     }
-    set(update) {
-        Object.assign(this.data, update);
+    eventsMap() {
+        return {
+            "click:.set-age": this.onSetAgeClick
+        };
+    }
+    template() {
+        return `
+      <div>
+        <h1>User Form</h1>
+        <div>User name: ${this.model.get("name")}</div>
+        <div>User age: ${this.model.get("age")}</div>
+        <input />
+        <button>Click Me</button>
+        <button class="set-age">Set Random Age</button>
+      </div>
+    `;
+    }
+    bindEvents(fragment) {
+        const eventsMap = this.eventsMap();
+        for(let eventKey in eventsMap){
+            const [eventName, selector] = eventKey.split(":");
+            fragment.querySelectorAll(selector).forEach((element)=>{
+                element.addEventListener(eventName, eventsMap[eventKey]);
+            });
+        }
+    }
+    render() {
+        const templateElement = document.createElement("template");
+        templateElement.innerHTML = this.template();
+        this.bindEvents(templateElement.content);
+        this.parent.append(templateElement.content);
     }
 }
 
-},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72","./Eventing":"7459s","./Sync":"QO3Gl"}],"tJZ72":[function(require,module,exports) {
+},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"tJZ72":[function(require,module,exports) {
 exports.interopDefault = function(a) {
     return a && a.__esModule ? a : {
         default: a
@@ -635,35 +665,90 @@ exports.export = function(dest, destName, get) {
     });
 };
 
-},{}],"7459s":[function(require,module,exports) {
+},{}],"4rcHn":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
-parcelHelpers.export(exports, "Eventing", ()=>Eventing);
-class Eventing {
-    on(eventName, callback) {
-        const handlers = this.events[eventName] || [];
-        handlers.push(callback);
-        this.events[eventName] = handlers;
+parcelHelpers.export(exports, "User", ()=>User);
+var _model = require("./Model");
+var _attributes = require("./Attributes");
+var _apiSync = require("./ApiSync");
+var _eventing = require("./Eventing");
+var _collection = require("./Collection");
+const rootUrl = "http://localhost:3000/users";
+class User extends (0, _model.Model) {
+    static buildUser(attrs) {
+        return new User(new (0, _attributes.Attributes)(attrs), new (0, _eventing.Eventing)(), new (0, _apiSync.ApiSync)(rootUrl));
     }
-    trigger(eventName) {
-        const handlers = this.events[eventName];
-        if (!handlers || handlers.length === 0) return;
-        handlers.forEach((callback)=>{
-            callback();
+    static buildUserCollection() {
+        return new (0, _collection.Collection)(rootUrl, (json)=>User.buildUser(json));
+    }
+    setRandomAge() {
+        const age = Math.round(Math.random() * 100);
+        this.set({
+            age
         });
-    }
-    constructor(){
-        this.events = {};
     }
 }
 
-},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"QO3Gl":[function(require,module,exports) {
+},{"./Model":"f033k","./Attributes":"6Bbds","./ApiSync":"3wylh","./Eventing":"7459s","./Collection":"dD11O","@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"f033k":[function(require,module,exports) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
-parcelHelpers.export(exports, "Sync", ()=>Sync);
+parcelHelpers.export(exports, "Model", ()=>Model);
+class Model {
+    constructor(attributes, events, sync){
+        this.attributes = attributes;
+        this.events = events;
+        this.sync = sync;
+        this.on = this.events.on;
+        this.trigger = this.events.trigger;
+        this.get = this.attributes.get;
+    }
+    set(update) {
+        this.attributes.set(update);
+        this.events.trigger("change");
+    }
+    fetch() {
+        const id = this.get("id");
+        if (typeof id !== "number") throw new Error("Cannot fetch without an id");
+        this.sync.fetch(id).then((response)=>{
+            this.set(response.data);
+        });
+    }
+    save() {
+        this.sync.save(this.attributes.getAll()).then((response)=>{
+            this.trigger("save");
+        }).catch(()=>{
+            this.trigger("error");
+        });
+    }
+}
+
+},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"6Bbds":[function(require,module,exports) {
+var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
+parcelHelpers.defineInteropFlag(exports);
+parcelHelpers.export(exports, "Attributes", ()=>Attributes);
+class Attributes {
+    constructor(data){
+        this.data = data;
+        this.get = (key)=>{
+            return this.data[key];
+        };
+    }
+    set(update) {
+        Object.assign(this.data, update);
+    }
+    getAll() {
+        return this.data;
+    }
+}
+
+},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"3wylh":[function(require,module,exports) {
+var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
+parcelHelpers.defineInteropFlag(exports);
+parcelHelpers.export(exports, "ApiSync", ()=>ApiSync);
 var _axios = require("axios");
 var _axiosDefault = parcelHelpers.interopDefault(_axios);
-class Sync {
+class ApiSync {
     constructor(rootUrl){
         this.rootUrl = rootUrl;
     }
@@ -5004,6 +5089,58 @@ Object.entries(HttpStatusCode).forEach(([key, value])=>{
 });
 exports.default = HttpStatusCode;
 
-},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}]},["2Ipmi","h7u1C"], "h7u1C", "parcelRequire94c2")
+},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"7459s":[function(require,module,exports) {
+var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
+parcelHelpers.defineInteropFlag(exports);
+parcelHelpers.export(exports, "Eventing", ()=>Eventing);
+class Eventing {
+    constructor(){
+        this.events = {};
+        this.on = (eventName, callback)=>{
+            const handlers = this.events[eventName] || [];
+            handlers.push(callback);
+            this.events[eventName] = handlers;
+        };
+        this.trigger = (eventName)=>{
+            const handlers = this.events[eventName];
+            if (!handlers || handlers.length === 0) return;
+            handlers.forEach((callback)=>{
+                callback();
+            });
+        };
+    }
+}
+
+},{"@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}],"dD11O":[function(require,module,exports) {
+var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
+parcelHelpers.defineInteropFlag(exports);
+parcelHelpers.export(exports, "Collection", ()=>Collection);
+var _axios = require("axios");
+var _axiosDefault = parcelHelpers.interopDefault(_axios);
+var _eventing = require("./Eventing");
+class Collection {
+    constructor(rootUrl, deserialize){
+        this.rootUrl = rootUrl;
+        this.deserialize = deserialize;
+        this.models = [];
+        this.events = new (0, _eventing.Eventing)();
+    }
+    get on() {
+        return this.events.on;
+    }
+    get trigger() {
+        return this.events.trigger;
+    }
+    fetch() {
+        (0, _axiosDefault.default).get(this.rootUrl).then((response)=>{
+            response.data.forEach((value)=>{
+                this.models.push(this.deserialize(value));
+            });
+            this.trigger("change");
+        });
+    }
+}
+
+},{"axios":"jo6P5","./Eventing":"7459s","@parcel/transformer-js/src/esmodule-helpers.js":"tJZ72"}]},["2Ipmi","h7u1C"], "h7u1C", "parcelRequire94c2")
 
 //# sourceMappingURL=index.b71e74eb.js.map
